@@ -23,9 +23,9 @@ class POSReport:
 
 
 class InventoryList(POSReport):
-    def __init__(self, file_path, header_row_index, columns_to_keep):
+    def __init__(self, file_path, header_row_index=5, columns_to_keep=3):
         super().__init__(file_path, header_row_index, columns_to_keep)
-        
+        self.filter_rows()
 
     def filter_rows(self):
         """
@@ -39,15 +39,16 @@ class InventoryList(POSReport):
             row_values = [x.value for x in row[:self.columns_to_keep]]
             if any(row_values): # Empty Row check
                 if row_values[1] and row_values[2]: # Valid Item check
-                    if row_values[0] == 'Transaction Fee': # End of workbook check
+                    if row_values[0] == 'Transaction Fee' or row_values[1] == 'Transaction Fee': # End of workbook check
                         return
                     self.output_table.append(row_values)
         return
         
 
 class PriceList(POSReport):
-    def __init__(self, file_path, header_row_index, columns_to_keep):
+    def __init__(self, file_path, header_row_index=4, columns_to_keep=3):
         super().__init__(file_path, header_row_index, columns_to_keep)
+        self.filter_rows()
 
     def filter_rows(self):
         """
@@ -63,7 +64,7 @@ class PriceList(POSReport):
             row_values = [x.value.upper() if isinstance(x.value, str) else x.value for x in row[:self.columns_to_keep]]
             if any(row_values): # Empty Row check
                 if row_values[0] and row_values[2]: # Valid Item check
-                    if row_values[0] == 'Transaction Fee': # End of workbook check
+                    if row_values[0] == 'Transaction Fee' or row_values[1] == 'Transaction Fee': # End of workbook check
                         return
                     self.output_table.append(row_values)
         return
@@ -86,14 +87,36 @@ class SalesList(POSReport):
         return
 
 
-class CleanedItemList:
+class FullItemList:
     def __init__(self, active_upc_item_file_path):
         self.active_upc_item_file_path = active_upc_item_file_path
+        self.df = pd.read_excel(active_upc_item_file_path)
+        self.create_unit_size_column()
+        self.df.to_excel('full_item_list.xls', index=False)
 
-    def extract_unit_size(self):
-        pass
+    def create_unit_size_column(self):
+        self.df['Unit Size'] = self.df['Item Name'].apply(lambda x: self.extract_unit_size(x))
+        self.df['Item Name'] = self.df['Item Name'].apply(lambda x: self.remove_unit_size(x))
 
+        
+        return
 
+    def extract_unit_size(self, x):
+        item_name = str(x)
+        filter = re.compile('\d+\.*\d* *(ML|L|PAK|OZ|GALLON|CAN|OZ|L|P|O|BLT|BTL|PACK|CT|0Z|BTLS|OZ BOTTLE|CN|G|LBS|QT|Z|STICKS)+')
+        if re.search(filter, item_name):
+            return item_name[re.search(filter, item_name).start():re.search(filter, item_name).end()].strip()
+        else:
+            return ''
+
+    def remove_unit_size(self, x):
+        item_name = str(x)
+        filter = re.compile('\d+\.*\d* *(ML|L|PAK|OZ|GALLON|CAN|OZ|L|P|O|BLT|BTL|PACK|CT|0Z|BTLS|OZ BOTTLE|CN|G|LBS|QT|Z)+')
+        if re.search(filter, item_name):
+            return (item_name[:re.search(filter, item_name).start()] + item_name[re.search(filter, item_name).end()+1:]).strip()
+        else:
+            return item_name
+        
 def match_expression_on_list(item_list):
     """
     - PAK
@@ -123,11 +146,19 @@ def match_expression_on_list(item_list):
     for item in item_list:
         if re.findall(filter, item):
             filtered_list.append(item)
-    pd.DataFrame(filtered_list).to_excel('items_with_unit_size.xls')
+    pd.DataFrame(filtered_list).to_excel('items_with_unit_size.xls', index=False)
 
 
 if __name__ == "__main__":
-    all_sales_items_combined = []
+    inventory = InventoryList('./pos_reports/inventory/inv_10_14_2021.xls')
+    price = PriceList('./pos_reports/price/price_10_14_2021.xls')
+    print(price.output_table[:100])
+    #inventory_price_list = [ i + j[1:] for i in inventory.output_table for j in price.output_table if i[1] == j[0] ]
+    #print(inventory_price_list)
+
+
+
+    """all_sales_items_combined = []
     # Read in and append SalesList objects to the list
     for i in range(4,10):
         all_sales_items_combined.append(SalesList(f'./pos_reports/sales/sales_{i}.xls', 8, 2))
@@ -139,26 +170,17 @@ if __name__ == "__main__":
     
     all_sales_items_combined_df = pd.concat(all_sales_items_combined)
     all_active_items = all_sales_items_combined_df.drop_duplicates()
-    all_active_items.to_excel('active_items_past_6_months.xls')
+    all_active_items.to_excel('active_items_past_6_months.xls', index=False)
 
-    """duplicate_items = all_active_items[all_active_items['Item Name'].duplicated() == True]
-    duplicate_items.to_excel('duplicate_items.xls')
+    duplicate_items = all_active_items[all_active_items['Item Name'].duplicated() == True]
+    duplicate_items.to_excel('duplicate_items.xls', index=False)
 
     duplicate_upc = all_active_items[all_active_items['UPC'].duplicated() == True]
-    duplicate_upc.to_excel('duplicate_upc.xls')"""
+    duplicate_upc.to_excel('duplicate_upc.xls', index=False)
     all_active_items_list = list(all_active_items['Item Name'].astype(str))
     match_expression_on_list(all_active_items_list)
 
-    """#print(len(no_duplicates))
-    inventory_list = InventoryList('./pos_reports/Inventory List_2021_10_14.xls', 5, 3)
-    inventory_list.filter_rows()
-    print('inventory', len(inventory_list.output_table))
-    inventory_list.remove_duplicate_rows()
-    print('inventory', len(inventory_list.output_table))
+    FullItemList('active_items_past_6_months.xls')"""
 
-    price_list = PriceList('./pos_reports/Price List_2021_10_14.xls', 4, 3)
-    price_list.filter_rows()
-    print('price list', len(price_list.output_table))
-    price_list.remove_duplicate_rows()
-    print('price list', len(price_list.output_table))"""
+
 
